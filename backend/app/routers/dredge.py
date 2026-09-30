@@ -26,8 +26,30 @@ def list_entries(
     """按清淤单号与状态过滤清淤疏浚列表；没有数据时返回空页，不报错。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
+    if status and status not in STATUSES:
+        raise HTTPException(status_code=400, detail=f"状态「{status}」不在可选范围内")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/stats")
+def get_stats() -> dict[str, float]:
+    """清淤队列与本月产出指标，动作完成后随列表一起刷新。"""
+    return service.stats()
+
+
+@router.get("/ledger")
+def get_ledger() -> dict[str, Any]:
+    """调度台账：验收结论回写到台账，同一批次清淤疏浚只计一次。"""
+    items = service.ledger_rows()
+    return {"module": "dredge", "total": len(items), "items": items}
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出清淤疏浚清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "dredge", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -41,25 +63,26 @@ def get_entry(entry_id: int) -> dict:
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条清淤单，缺字段时说明原因而不是静默丢弃。"""
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    """登记一条清淤单，缺字段或重复单号时说明原因而不是静默丢弃。"""
+    entry, message = service.create_entry(payload.values)
+    if entry is None:
+        return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message="清淤单已登记", entry=entry)
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条清淤单执行安排清淤、确认完成、取消清淤；不允许的动作会被拦下并说明原因。"""
+    """对单条清淤单执行安排清淤、确认完成、取消清淤。
+
+    不允许的动作/状态会被拦下并说明原因；client_token 用于断线重试，
+    同一 token 的重复提交只回放首次结果，不会把已完成的作业退回待安排。
+    """
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    client_token = payload.values.get("client_token") or payload.remark
+    client_token = str(client_token).strip() if client_token else None
+    entry, message = service.run_action(
+        entry_id, action, values=payload.values, client_token=client_token
+    )
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出清淤疏浚清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "dredge", "total": total, "items": items}
