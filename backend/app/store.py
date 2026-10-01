@@ -6,13 +6,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.seed import SEED_ROWS
+from app.seed import SEED_LEDGER_ROWS, SEED_ROWS
 
 
 class Store:
     def __init__(self) -> None:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
+        }
+        # 调度台账按业务子域分表（如清淤疏浚 -> dredge），每行以业务键去重
+        self._ledgers: dict[str, dict[Any, dict[str, Any]]] = {
+            name: {row["key"]: dict(row) for row in rows}
+            for name, rows in SEED_LEDGER_ROWS.items()
         }
 
     def module_names(self) -> list[str]:
@@ -26,6 +31,15 @@ class Store:
             if int(row.get("id", 0)) == entry_id:
                 return row
         return None
+
+    def ledger(self, scope: str) -> dict[Any, dict[str, Any]]:
+        """取某个业务子域的调度台账（以业务键为索引，天然防重）。"""
+        return self._ledgers.setdefault(scope, {})
+
+    def ledger_rows(self, scope: str) -> list[dict[str, Any]]:
+        """台账按业务键排序展开，供列表/导出使用。"""
+        table = self.ledger(scope)
+        return [table[key] for key in sorted(table, key=lambda item: str(item))]
 
     def overview(self) -> dict[str, object]:
         modules: list[dict[str, object]] = []

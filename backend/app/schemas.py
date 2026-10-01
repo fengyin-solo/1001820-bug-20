@@ -172,6 +172,8 @@ class DredgeEntry(BaseModel):
     field_5: str | None = None  # 作业班组
     field_6: str | None = None  # 完成日期
     field_7: str | None = None  # 清淤状态
+    field_8: str | None = None  # 批次号
+    field_9: str | None = None  # 验收结论
 
 class MaterialEntry(BaseModel):
     """养护材料明细结构。"""
